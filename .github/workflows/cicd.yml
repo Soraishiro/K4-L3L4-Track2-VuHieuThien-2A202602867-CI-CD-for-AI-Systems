@@ -62,13 +62,27 @@ jobs:
       - name: Authenticate to Cloud Storage
         run: |
           echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/aws-credentials.json
-          echo "STORAGE_CREDS=$(cat /tmp/aws-credentials.json)" >> $GITHUB_ENV
+          mkdir -p ~/.aws
+          python - <<'PYEOF'
+          import json, pathlib
+          creds = json.loads(pathlib.Path("/tmp/aws-credentials.json").read_text())
+          out = pathlib.Path.home() / ".aws" / "credentials"
+          out.write_text(
+              "[default]\n"
+              f"aws_access_key_id = {creds['aws_access_key_id']}\n"
+              f"aws_secret_access_key = {creds['aws_secret_access_key']}\n"
+          )
+          out.chmod(0o600)
+          print("AWS credentials file written for", creds["aws_access_key_id"])
+          PYEOF
+
+      - name: Verify S3 access
+        run: |
+          aws sts get-caller-identity
+          aws s3 ls "s3://${{ secrets.ARTIFACT_BUCKET }}/dvc/files/md5/"
 
       - name: Pull data with DVC
-        run: |
-          export AWS_ACCESS_KEY_ID=$(python -c "import json,os; print(json.loads(os.environ['STORAGE_CREDS'])['aws_access_key_id'])")
-          export AWS_SECRET_ACCESS_KEY=$(python -c "import json,os; print(json.loads(os.environ['STORAGE_CREDS'])['aws_secret_access_key'])")
-          dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
+        run: dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
 
       - name: Train model
         run: python src/train.py
@@ -81,19 +95,8 @@ jobs:
 
       - name: Upload model to Cloud Storage
         run: |
-          python - <<'PYEOF'
-          import json, os
-          import boto3
-          creds = json.loads(os.environ["STORAGE_CREDS"])
-          s3 = boto3.client("s3", aws_access_key_id=creds["aws_access_key_id"],
-                            aws_secret_access_key=creds["aws_secret_access_key"],
-                            region_name="ap-southeast-1")
-          s3.upload_file("models/model.joblib", os.environ["ARTIFACT_BUCKET"],
-                         "artifacts/current/model.joblib")
-          print("Uploaded model.joblib successfully")
-          PYEOF
-        env:
-          ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+          aws s3 cp models/model.joblib "s3://${{ secrets.ARTIFACT_BUCKET }}/artifacts/current/model.joblib"
+          echo "Uploaded model.joblib successfully"
 
       - name: Save report as artifact
         uses: actions/upload-artifact@v4
