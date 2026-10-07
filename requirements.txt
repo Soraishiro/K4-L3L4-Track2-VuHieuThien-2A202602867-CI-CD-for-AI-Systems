@@ -6,8 +6,8 @@ numpy>=2.0.0
 # Experiment tracking
 mlflow>=2.14.0
 
-# Data version control with GCP support
-dvc[gs]>=3.50.1
+# Data version control with AWS S3 support
+dvc[s3]>=3.50.1
 
 # Utilities
 pathspec==0.11.2
@@ -21,5 +21,5 @@ pytest==8.2.0
 fastapi==0.111.0
 uvicorn==0.29.0
 
-# Cloud storage (GCP)
-google-cloud-storage>=2.16.0
+# Cloud storage (AWS S3)
+boto3>=1.34.0
