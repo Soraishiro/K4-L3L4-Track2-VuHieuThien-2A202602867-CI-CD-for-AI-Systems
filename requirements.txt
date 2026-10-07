@@ -1,11 +1,25 @@
-mlflow==2.13.0
-scikit-learn==1.4.2
-pandas==2.2.2
-dvc[gs]==3.50.1
+# Core ML and data libraries
+pandas>=2.2.3
+scikit-learn>=1.5.0
+numpy>=2.0.0
+
+# Experiment tracking
+mlflow>=2.14.0
+
+# Data version control with GCP support
+dvc[gs]>=3.50.1
+
+# Utilities
 pathspec==0.11.2
+pyyaml>=6.0.2
+joblib>=1.4.0
+
+# Testing
 pytest==8.2.0
+
+# API serving
 fastapi==0.111.0
 uvicorn==0.29.0
-joblib==1.4.2
-google-cloud-storage==2.16.0
-pyyaml==6.0.1
+
+# Cloud storage (GCP)
+google-cloud-storage>=2.16.0
