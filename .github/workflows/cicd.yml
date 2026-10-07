@@ -3,11 +3,6 @@ name: Income Model CI/CD
 on:
   push:
     branches: [main]
-    paths:
-      - 'data/**.dvc'
-      - 'src/**.py'
-      - 'params.yaml'
-      - '.github/workflows/cicd.yml'
   workflow_dispatch:
 
 env:
