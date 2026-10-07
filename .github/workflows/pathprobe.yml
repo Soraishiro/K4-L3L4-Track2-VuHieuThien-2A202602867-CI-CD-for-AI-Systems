@@ -1,0 +1,17 @@
+name: Path Filter Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'data/**.dvc'
+      - 'src/**.py'
+      - 'params.yaml'
+
+jobs:
+  probe:
+    name: PathProbe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping
+        run: echo "path-filter probe on ${{ github.sha }}"
