@@ -64,18 +64,23 @@ jobs:
         run: |
           echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/aws-credentials.json
           mkdir -p ~/.aws
-          python - <<'PYEOF'
-          import json, pathlib
-          creds = json.loads(pathlib.Path("/tmp/aws-credentials.json").read_text())
-          out = pathlib.Path.home() / ".aws" / "credentials"
-          out.write_text(
-              "[default]\n"
-              f"aws_access_key_id = {creds['aws_access_key_id']}\n"
-              f"aws_secret_access_key = {creds['aws_secret_access_key']}\n"
-          )
-          out.chmod(0o600)
-          print("AWS credentials file written for", creds["aws_access_key_id"])
-          PYEOF
+          AK=$(python -c "import json;print(json.load(open('/tmp/aws-credentials.json'))['aws_access_key_id'])")
+          SK=$(python -c "import json;print(json.load(open('/tmp/aws-credentials.json'))['aws_secret_access_key'])")
+          {
+            echo "[default]"
+            echo "aws_access_key_id = $AK"
+            echo "aws_secret_access_key = $SK"
+          } > ~/.aws/credentials
+          chmod 600 ~/.aws/credentials
+          {
+            echo "[profile lab]"
+            echo "aws_access_key_id = $AK"
+            echo "aws_secret_access_key = $SK"
+          } > ~/.aws/config
+          echo "AWS_SHARED_CREDENTIALS_FILE=$HOME/.aws/credentials" >> $GITHUB_ENV
+          echo "AWS_CONFIG_FILE=$HOME/.aws/config" >> $GITHUB_ENV
+          echo "AWS_EC2_METADATA_DISABLED=true" >> $GITHUB_ENV
+          echo "AWS_PROFILE=lab" >> $GITHUB_ENV
 
       - name: Verify S3 access
         run: |
@@ -83,7 +88,11 @@ jobs:
           aws s3 ls "s3://${{ secrets.ARTIFACT_BUCKET }}/dvc/files/md5/"
 
       - name: Pull data with DVC
-        run: dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
+        run: |
+          export AWS_ACCESS_KEY_ID=$(python -c "import json;print(json.load(open('/tmp/aws-credentials.json'))['aws_access_key_id'])")
+          export AWS_SECRET_ACCESS_KEY=$(python -c "import json;print(json.load(open('/tmp/aws-credentials.json'))['aws_secret_access_key'])")
+          echo "AK len = ${#AWS_ACCESS_KEY_ID}, SK len = ${#AWS_SECRET_ACCESS_KEY}"
+          dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
 
       - name: Train model
         run: python src/train.py
