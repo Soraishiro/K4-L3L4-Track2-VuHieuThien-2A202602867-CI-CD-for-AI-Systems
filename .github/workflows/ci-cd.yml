@@ -49,6 +49,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       f1: ${{ steps.read_report.outputs.f1 }}
+      acc: ${{ steps.read_report.outputs.acc }}
+      precision: ${{ steps.read_report.outputs.precision }}
+      recall: ${{ steps.read_report.outputs.recall }}
+      best_threshold: ${{ steps.read_report.outputs.best_threshold }}
+      f1_best: ${{ steps.read_report.outputs.f1_best }}
+      drift: ${{ steps.read_report.outputs.drift }}
+      prev_f1: ${{ steps.previous.outputs.prev_f1 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -86,25 +93,61 @@ jobs:
       - name: Pull data with DVC
         run: dvc pull -v data/train_batch1.csv.dvc data/holdout.csv.dvc
 
+      # BONUS 4: giu ban model + F1 cua phien dang chay de tien hanh rollback.
+      - name: Save previous release for rollback
+        id: previous
+        run: |
+          set -euo pipefail
+          BUCKET="s3://${{ secrets.ARTIFACT_BUCKET }}"
+          PREV_F1=""
+          if aws s3 cp "$BUCKET/artifacts/current/report.json" /tmp/prev_report.json 2>/dev/null; then
+            PREV_F1=$(python -c "import json;print(json.load(open('/tmp/prev_report.json'))['f1_score'])")
+            aws s3 cp "$BUCKET/artifacts/current/model.joblib" "$BUCKET/artifacts/previous/model.joblib" || true
+            echo "Da luu ban model cua phien truoc vao artifacts/previous/"
+          else
+            echo "Chua co phien ban nao tren bucket - bo qua buoc rollback"
+          fi
+          echo "prev_f1=$PREV_F1" >> $GITHUB_OUTPUT
+
       - name: Train model
         run: python src/train.py
 
       - name: Read report
         id: read_report
         run: |
-          F1=$(python -c "import json; d=json.load(open('outputs/report.json')); print(d['f1_score'])")
-          echo "f1=$F1" >> $GITHUB_OUTPUT
+          python - <<'PYEOF'
+          import json, os
+          d = json.load(open("outputs/report.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"f1={d['f1_score']}\n")
+              f.write(f"acc={d['accuracy']}\n")
+              f.write(f"precision={d['precision']}\n")
+              f.write(f"recall={d['recall']}\n")
+              f.write(f"best_threshold={d['best_threshold']}\n")
+              f.write(f"f1_best={d['f1_at_best_threshold']}\n")
+              f.write(f"drift={d['drift']['drift_detected']}\n")
+          print(f"F1={d['f1_score']:.4f} Accuracy={d['accuracy']:.4f} Precision={d['precision']:.4f} Recall={d['recall']:.4f}")
+          print(f"Nguong toi uu={d['best_threshold']} -> F1={d['f1_at_best_threshold']:.4f}")
+          print(f"Drift: {d['drift']['drift_detected']} (ty le lop duong={d['drift']['positive_rate']:.4f})")
+          PYEOF
 
       - name: Upload model to Cloud Storage
         run: |
-          aws s3 cp models/model.joblib "s3://${{ secrets.ARTIFACT_BUCKET }}/artifacts/current/model.joblib"
-          echo "Uploaded model.joblib successfully"
+          BUCKET="s3://${{ secrets.ARTIFACT_BUCKET }}"
+          aws s3 cp models/model.joblib "$BUCKET/artifacts/current/model.joblib"
+          aws s3 cp outputs/report.json           "$BUCKET/artifacts/current/report.json"
+          aws s3 cp outputs/precision_recall.json "$BUCKET/artifacts/current/precision_recall.json"
+          aws s3 cp outputs/drift_report.json     "$BUCKET/artifacts/current/drift_report.json"
+          echo "Uploaded model + reports successfully"
 
       - name: Save report as artifact
         uses: actions/upload-artifact@v4
         with:
           name: report
-          path: outputs/report.json
+          path: |
+            outputs/report.json
+            outputs/precision_recall.json
+            outputs/drift_report.json
 
 
   # ---------------------------------------------------------------------------
@@ -123,6 +166,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      # BONUS 4: rollback - chi release khi F1 moi >= F1 cua phien ban truoc
+      - name: Check rollback against previous release
+        run: |
+          python3 - <<'PYEOF'
+          new = float("${{ needs.train.outputs.f1 }}")
+          prev_raw = "${{ needs.train.outputs.prev_f1 }}".strip()
+          print(f"F1 cua phien moi   : {new:.4f}")
+          if prev_raw:
+              prev = float(prev_raw)
+              print(f"F1 cua phien truoc : {prev:.4f}")
+              if new < prev:
+                  raise SystemExit(
+                      f"FAILED (rollback): F1 moi {new:.4f} < F1 cu {prev:.4f}. "
+                      f"Giu nguyen phien ban cu tren may chu.")
+              print(f"PASSED (rollback): F1 moi {new:.4f} >= F1 cu {prev:.4f}")
+          else:
+              print("Chua co phien ban truoc de so sanh - bo qua kiem tra rollback.")
+          PYEOF
+
       - name: Check quality gate
         run: |
           python3 - <<'PYEOF'
@@ -131,6 +193,21 @@ jobs:
               raise SystemExit(f"FAILED: f1_score {f1:.4f} < 0.65. Huy trien khai.")
           print(f"PASSED: f1_score {f1:.4f} >= 0.65. Dang trien khai model.")
           PYEOF
+
+      # BONUS 3 + 5: bang tong hop chat luong va canh bao lech lan
+      - name: Print metrics summary
+        run: |
+          echo '=================================================='
+          echo '  BAO CAO CHAT LUONG VA LECH LAN DU LIEU'
+          echo '=================================================='
+          echo "f1_score       : ${{ needs.train.outputs.f1 }}"
+          echo "accuracy       : ${{ needs.train.outputs.acc }}"
+          echo "precision      : ${{ needs.train.outputs.precision }}"
+          echo "recall         : ${{ needs.train.outputs.recall }}"
+          echo "nguong toi uu  : ${{ needs.train.outputs.best_threshold }}"
+          echo "f1 toi uu      : ${{ needs.train.outputs.f1_best }}"
+          echo "drift          : ${{ needs.train.outputs.drift }}"
+          echo '=================================================='
 
 
   # ---------------------------------------------------------------------------
