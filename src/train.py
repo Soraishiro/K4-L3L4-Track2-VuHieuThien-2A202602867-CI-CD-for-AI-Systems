@@ -20,6 +20,34 @@ BASE_POSITIVE_RATE = 0.248   # moc ty le lop duong cua bo du lieu goc
 DRIFT_TOLERANCE = 0.05       # cho phep lech toi da 5% so voi moc
 
 
+def setup_remote_tracking():
+    """
+    BONUS 1: theo doi MLflow tu xa tren DagsHub thay cho file sqlite cuc bo.
+
+    Chi kich hoat khi bien moi truong DAGSHUB_TOKEN duoc dat. Neu khong co token
+    thi MLflow tiep tuc dung backend sqlite cuc bo nhu Bước 1.
+    """
+    token = os.environ.get("DAGSHUB_TOKEN")
+    if not token:
+        print("[MLflow] Dung backend cuc bo (sqlite). Khong co DAGSHUB_TOKEN.")
+        return None
+
+    user = os.environ.get("DAGSHUB_USER", "thienmarco10")
+    repo = os.environ.get("DAGSHUB_REPO", "mlflow")
+
+    import dagshub
+    import dagshub.auth
+
+    dagshub.auth.add_app_token(token)
+    # patch_mlflow=True: tuong thich MLflow 3.x voi API cu hon cua DagsHub,
+    # tranh loi 404 o cac endpoint logged-models.
+    dagshub.init(repo_name=repo, repo_owner=user, mlflow=True, patch_mlflow=True)
+
+    mlflow.set_experiment("Income-Model")
+    print(f"[MLflow] Tracking từ xa: https://dagshub.com/{user}/{repo}.mlflow")
+    return mlflow.get_tracking_uri()
+
+
 def scan_thresholds(y_true, proba, lo=0.1, hi=0.9, step=0.05):
     """
     BONUS 2: quet nguong xac suat 0.1 -> 0.9 de tim F1 toi uu thay vi mac dinh 0.5.
@@ -68,6 +96,8 @@ def train(
     y_train = df_train["target"]
     X_eval = df_eval.drop(columns=["target"])
     y_eval = df_eval["target"]
+
+    setup_remote_tracking()
 
     with mlflow.start_run():
 
